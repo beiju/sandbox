@@ -1,5 +1,8 @@
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use fed::FedEvent;
+use anyhow::anyhow;
+use fed::{FedEvent, FedEventData};
+use fed::FedEventDataStructure::LetsGo;
 use uuid::Uuid;
 use crate::game::Game;
 use crate::rng::Rng;
@@ -23,11 +26,20 @@ impl Sim {
             return Ok(())
         };
 
-        let game = self.games.entry(game_event.game_id).or_insert(Game::new());
+        let game = match self.games.entry(game_event.game_id) {
+            Entry::Occupied(entry) => { entry.into_mut() }
+            Entry::Vacant(entry) => if let FedEventData::LetsGo { game, weather, stadium_id } = &event.data {
+                entry.insert(Game::new(game, *weather, *stadium_id))
+            } else {
+                return Err(anyhow!("First event for game was not a LetsGo event"))
+            }
+        };
 
         let event_from_sim = game.tick(&mut self.rng);
 
         assert_eq!(event.data, event_from_sim);
+
+        println!("Validated {} for game {}", event_from_sim.as_ref(), game_event.game_id);
         Ok(())
     }
 }
