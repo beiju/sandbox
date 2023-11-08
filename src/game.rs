@@ -1,6 +1,8 @@
+use anyhow::anyhow;
 use fed::{FedEventData, GameEvent, Weather};
 use uuid::Uuid;
 use crate::rng::Rng;
+use crate::sim::SimData;
 
 #[derive(Debug)]
 pub enum GamePhase {
@@ -54,16 +56,16 @@ impl Game {
         result
     }
 
-    pub fn tick(&mut self, rng: &mut Rng) -> FedEventData {
+    pub fn tick(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
         match self.phase {
             GamePhase::NotStarted => {
-                self.lets_go()
+                Ok(self.lets_go())
             }
             GamePhase::Starting => {
-                self.play_ball()
+                Ok(self.play_ball())
             }
             GamePhase::StartOfHalfInning => {
-                self.start_half_inning()
+                self.start_half_inning(sim_data)
             }
         }
     }
@@ -84,16 +86,18 @@ impl Game {
         }
     }
 
-    fn start_half_inning(&mut self) -> FedEventData {
+    fn start_half_inning(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
         // self.phase = GamePhase::StartOfHalfInning;
         self.top_of_inning = !self.top_of_inning;
         self.inning += 1;
-        FedEventData::HalfInningStart {
+        Ok(FedEventData::HalfInningStart {
             game: self.game_event(),
             top_of_inning: self.top_of_inning,
-            inning: self.inning,
-            batting_team_name: "".to_string(),
-            subseasonal_mod_effects: vec![],
-        }
+            inning: self.inning + 1, // one-indexed
+            batting_team_name: sim_data.teams.get(&if self.top_of_inning { self.away_team } else { self.home_team })
+                .ok_or_else(|| anyhow!("Couldn't find batting team"))?
+                .full_name.clone(),
+            subseasonal_mod_effects: vec![], // TODO
+        })
     }
 }

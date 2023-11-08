@@ -8,20 +8,26 @@ use crate::game::Game;
 use crate::rng::Rng;
 
 #[derive(Debug)]
+pub struct SimData {
+    pub rng: Rng,
+    pub teams: HashMap<Uuid, Team>,
+    pub players: HashMap<Uuid, Player>,
+}
+#[derive(Debug)]
 pub struct Sim {
     games: HashMap<Uuid, Game>,
-    rng: Rng,
-    teams: HashMap<Uuid, Team>,
-    players: HashMap<Uuid, Player>
+    sim_data: SimData,
 }
 
 impl Sim {
     pub fn new(s0: u64, s1: u64, teams: HashMap<Uuid, Team>, players: HashMap<Uuid, Player>) -> Self {
         Self {
             games: Default::default(),
-            rng: Rng::new(s0, s1),
-            teams,
-            players,
+            sim_data: SimData {
+                rng: Rng::new(s0, s1),
+                teams,
+                players,
+            }
         }
     }
 
@@ -29,7 +35,6 @@ impl Sim {
         let Some(game_event) = event.data.game() else {
             return Ok(())
         };
-
         let game = match self.games.entry(game_event.game_id) {
             Entry::Occupied(entry) => { entry.into_mut() }
             Entry::Vacant(entry) => if let FedEventData::LetsGo { game, weather, stadium_id } = &event.data {
@@ -39,7 +44,7 @@ impl Sim {
             }
         };
 
-        let event_from_sim = game.tick(&mut self.rng);
+        let event_from_sim = game.tick(&mut self.sim_data)?;
 
         assert_eq!(event.data, event_from_sim);
 
