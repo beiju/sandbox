@@ -6,7 +6,8 @@ use crate::rng::Rng;
 pub enum GamePhase {
     // TODO: Use Blarser to ensure this is in sync with proper game phases
     NotStarted = 0,
-
+    Starting,
+    StartOfHalfInning,
 }
 
 #[derive(Debug)]
@@ -18,6 +19,9 @@ pub struct Game {
     stadium_id: Option<Uuid>,
 
     phase: GamePhase,
+    play: i64,
+    top_of_inning: bool,
+    inning: i32,
 }
 
 impl Game {
@@ -29,29 +33,67 @@ impl Game {
             weather,
             stadium_id,
             phase: GamePhase::NotStarted,
+            play: 0,
+            // play starts at the "bottom of the 0th" so that the first half-inning-start moves us
+            // to the top of the first. innings are zero-indexed so the "zeroth" is -1
+            top_of_inning: false,
+            inning: -1,
         }
+    }
+
+    fn game_event(&mut self) -> GameEvent {
+        let result = GameEvent {
+            game_id: self.game_id,
+            home_team: self.home_team,
+            away_team: self.away_team,
+            play: self.play,
+            unscatter: None,
+            attractor_secret_base: None,
+        };
+        self.play += 1;
+        result
     }
 
     pub fn tick(&mut self, rng: &mut Rng) -> FedEventData {
         match self.phase {
             GamePhase::NotStarted => {
-                self.start_game()
+                self.lets_go()
+            }
+            GamePhase::Starting => {
+                self.play_ball()
+            }
+            GamePhase::StartOfHalfInning => {
+                self.start_half_inning()
             }
         }
     }
 
-    pub fn start_game(&mut self) -> FedEventData {
+    fn lets_go(&mut self) -> FedEventData {
+        self.phase = GamePhase::Starting;
         FedEventData::LetsGo {
-            game: GameEvent {
-                game_id: self.game_id,
-                home_team: self.home_team,
-                away_team: self.away_team,
-                play: 0,
-                unscatter: None,
-                attractor_secret_base: None,
-            },
+            game: self.game_event(),
             weather: self.weather,
             stadium_id: self.stadium_id,
+        }
+    }
+
+    fn play_ball(&mut self) -> FedEventData {
+        self.phase = GamePhase::StartOfHalfInning;
+        FedEventData::PlayBall {
+            game: self.game_event()
+        }
+    }
+
+    fn start_half_inning(&mut self) -> FedEventData {
+        // self.phase = GamePhase::StartOfHalfInning;
+        self.top_of_inning = !self.top_of_inning;
+        self.inning += 1;
+        FedEventData::HalfInningStart {
+            game: self.game_event(),
+            top_of_inning: self.top_of_inning,
+            inning: self.inning,
+            batting_team_name: "".to_string(),
+            subseasonal_mod_effects: vec![],
         }
     }
 }

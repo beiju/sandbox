@@ -1,9 +1,19 @@
+#![feature(iterator_try_collect)]
+
 mod sim;
 mod game;
 mod rng;
+mod chronicler_schema;
 
+use std::collections::HashMap;
+use futures::{pin_mut, StreamExt, TryStreamExt};
+use itertools::Itertools;
 use chrono::{DateTime, Utc};
 use fed;
+use uuid::Uuid;
+use crab::chron;
+use serde::Deserialize;
+use crate::chronicler_schema::{Player, Team};
 use crate::sim::Sim;
 
 type Fragment = (i64, (u64, u64), i64, i64, &'static str, &'static str);
@@ -54,7 +64,7 @@ const FRAGMENTS: [Fragment; 108] = [
     // mid-game restart during S12D88, between 2021-03-12T09:21:22.163Z and 2021-03-12T09:21:46.082Z.
     // For some reason the range 09:24:00-09:24:10 is impossible for me to align with what's after it.
     // I don't know why! So there's about 4 minutes missing in day 88.
-    (12, (17262598579754601440, 1372102753813730563), 34, - 4, "2021-03-12T09:25:21.623Z", "2021-03-12T19:50:00.000Z"),
+    (12, (17262598579754601440, 1372102753813730563), 34, -4, "2021-03-12T09:25:21.623Z", "2021-03-12T19:50:00.000Z"),
     // deploy at 2021-03-12T19:50:00Z
     (12, (12600639729467795539, 6003152159250863900), 0, 0, "2021-03-12T20:00:00.000Z", "2021-03-13T01:50:00Z"),
     // No listed deploy, but there seems to be a break between S13D103 and D104
@@ -62,14 +72,14 @@ const FRAGMENTS: [Fragment; 108] = [
     // deploy at 2021-03-14T04:05:00Z
     // SEASON 14:
     (13, (8640116423355544309, 9923965671729542710), 0, 0, "2021-03-15T15:00:00.000Z", "2021-03-15T20:55:29.050219Z"),
-    (13, (12335197627095558518, 4993735724122314585), 11, - 1, "2021-03-15T21:00:00.000Z", "2021-03-16T15:50:01.111345Z"),  // noqa: E501
+    (13, (12335197627095558518, 4993735724122314585), 11, -1, "2021-03-15T21:00:00.000Z", "2021-03-16T15:50:01.111345Z"),  // noqa: E501
     // deploy at 2021-03-16T16:20:00Z
-    (13, (3707231913994734955, 16004224931998739944), 51, - 1, "2021-03-16T18:00:00Z", "2021-03-16T20:50:00.000Z"),
+    (13, (3707231913994734955, 16004224931998739944), 51, -1, "2021-03-16T18:00:00Z", "2021-03-16T20:50:00.000Z"),
     (13, (16935077139086615170, 7227318407464058534), 12, 0, "2021-03-16T21:00:00.000Z", "2021-03-17T18:50:07.535Z"),
     // deploy at 2021-03-17T18:50:00Z
     (13, (647677220274352043, 14172195254117178691), 12, 0, "2021-03-17T19:00:00Z", "2021-03-17T19:50:00Z"),
     // deploy at 2021-03-17T19:55:00Z
-    (13, (5750154725705680658, 7572065454551339919), 12, - 1, "2021-03-17T20:00:00Z", "2021-03-18T14:50:37.673409Z"),
+    (13, (5750154725705680658, 7572065454551339919), 12, -1, "2021-03-17T20:00:00Z", "2021-03-18T14:50:37.673409Z"),
     // deploy at 2021-03-18T14:50:00Z
     (13, (14329231552902792263, 18343048993884457641), 12, 0, "2021-03-18T15:00:00Z", "2021-03-18T17:40:00.966Z"),
     // deploy at 2021-03-18T17:40:00Z
@@ -81,7 +91,7 @@ const FRAGMENTS: [Fragment; 108] = [
     (13, (18280451156624678684, 16123465889931048163), 2, 0, "2021-03-18T22:01:16.566Z", "2021-03-19T00:56:16.567Z"),
     (13, (4369050506664465536, 4603334513036430167), 12, 0, "2021-03-19T01:00:00.000Z", "2021-03-19T18:40:01.593947Z"),
     // 2021-03-19T18:50:00Z
-    (13, (1705402211782391315, 14786618665043368424), 63, - 1, "2021-03-19T19:00:00Z", "2021-03-19T19:19:26.102Z"),
+    (13, (1705402211782391315, 14786618665043368424), 63, -1, "2021-03-19T19:00:00Z", "2021-03-19T19:19:26.102Z"),
     // Mid-game restart during S14D99
     (13, (17332235655028997556, 6510596254177638633), 6, 0, "2021-03-19T19:20:09.000Z", "2021-03-20T19:50:01.020Z"),
     // SEASON 15:
@@ -102,12 +112,12 @@ const FRAGMENTS: [Fragment; 108] = [
     (14, (6033393494486318410, 6992320288130472062), 62, 0, "2021-04-07T17:00:00Z", "2021-04-07T22:50:13.341Z"),
     (14, (5082886454574003662, 2374945375831325277), 62, 0, "2021-04-07T23:00:00Z", "2021-04-08T01:50:56.946Z"),
     // deploy at 2021-04-08T02:00:00Z
-    (14, (818230392324657822, 13958695923778937231), 50, - 12, "2021-04-08T02:00:00.000Z", "2021-04-08T14:50:46.446Z"),
+    (14, (818230392324657822, 13958695923778937231), 50, -12, "2021-04-08T02:00:00.000Z", "2021-04-08T14:50:46.446Z"),
     (14, (14089361583866000722, 2263563325949770448), 62, 0, "2021-04-08T15:00:00Z", "2021-04-08T17:26:26.937Z"),
     // mid-game restart between 2021-04-08T17:26:26.937Z and 2021-04-08T17:26:50.939Z
     (14, (14445530066672905733, 9753476557479306590), 50, 0, "2021-04-08T17:26:35Z", "2021-04-08T19:50:00Z"),
     // deploy at 2021-04-08T19:50:00Z
-    (14, (11947114742050313518, 14817598476034896117), 62, - 1, "2021-04-08T20:00:00.000Z", "2021-04-09T19:40:40.804096Z"),  // noqa: E501
+    (14, (11947114742050313518, 14817598476034896117), 62, -1, "2021-04-08T20:00:00.000Z", "2021-04-09T19:40:40.804096Z"),  // noqa: E501
     (14, (11741473536472310906, 13138857156664992063), 50, 0, "2021-04-09T21:00:00Z", "2021-04-10T20:50:43.708Z"),
     // SEASON 16
     (15, (10932564791979919451, 14996520360868746409), 0, 0, "2021-04-12T15:00:00Z", "2021-04-12T15:59:00.000Z"),
@@ -206,7 +216,7 @@ const FRAGMENTS: [Fragment; 108] = [
     // deploy at 2021-06-15T21:55:00Z
     (19, (7943813107847417936, 11710957498055735526), 12, 0, "2021-06-15T22:00:00Z", "2021-06-16T04:59:00.000Z"),
     (19, (12471352467777430005, 13632017682517987076), 49, 7, "2021-06-16T05:00:00Z", "2021-06-16T07:59:00.000Z"),
-    (19, (17791062997308723570, 9874943169784635931), 8, - 1, "2021-06-16T08:00:00Z", "2021-06-16T14:59:00.000Z"),
+    (19, (17791062997308723570, 9874943169784635931), 8, -1, "2021-06-16T08:00:00Z", "2021-06-16T14:59:00.000Z"),
     (19, (14221967040496645937, 16738649322168749995), 58, -1, "2021-06-16T15:00:00Z", "2021-06-16T22:12:58.475Z"),
     //mid-game restart between 2021-06-16T22:12:58.475Z and 2021-06-16T22:13:33.811Z
     (19, (13144040369900249853, 13982262684361311212), 0, 0, "2021-06-16T22:13:33.810Z", "2021-06-17T08:59:00.000Z"),
@@ -228,18 +238,24 @@ const FRAGMENTS: [Fragment; 108] = [
     // deploy at 2021-06-20T17:35:00Z
 ];
 
-fn main() -> anyhow::Result<()> {
+const CHRON_API_ENDPOINT: &'static str = "https://api.sibr.dev/chronicler/v2/entities";
+
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
     let mut event_iter = fed::expansion_era_events();
     let mut skipping: Option<u32> = None;
     'fragment_loop: for fragment in FRAGMENTS {
         let (_season, (s0, s1), _offset, _rng_step, start_time, end_time) = fragment;
-        let mut sim_state = Sim::new(s0, s1);
+        let (teams, players) = get_sim_state_at_time(&client, start_time).await?;
+        let mut sim_state = Sim::new(s0, s1, teams, players);
         let start_date: DateTime<Utc> = start_time.parse()?;
         let end_date: DateTime<Utc> = end_time.parse()?;
         while let Some(event) = event_iter.next() {
             let event = event?;
             if event.created >= end_date {
-                continue 'fragment_loop
+                continue 'fragment_loop;
             } else if event.created < start_date {
                 match skipping {
                     None => {
@@ -260,4 +276,106 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+async fn get_sim_state_at_time(client: &reqwest::Client, start_time_str: &str) -> anyhow::Result<(HashMap<Uuid, Team>, HashMap<Uuid, Player>)> {
+    let start_time = DateTime::parse_from_rfc3339(start_time_str)?.with_timezone(&Utc);
+
+    #[derive(Debug, Deserialize)]
+    struct Sim {
+        league: Uuid,
+    }
+
+    let league = chron::v2::fetch::<Sim>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+        .ty("sim")
+        .id(Uuid::nil())
+        .at(start_time)
+        .build()?)
+        .try_collect::<Vec<_>>().await?
+        .into_iter()
+        .exactly_one()?
+        .data.league;
+
+    #[derive(Debug, Deserialize)]
+    struct League {
+        subleagues: [Uuid; 2],
+    }
+
+    let subleagues = chron::v2::fetch::<League>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+        .ty("league")
+        .id(league)
+        .at(start_time)
+        .build()?)
+        .try_collect::<Vec<_>>().await?
+        .into_iter()
+        .flat_map(|league| league.data.subleagues)
+        .collect::<Vec<_>>();
+
+
+    #[derive(Debug, Deserialize)]
+    struct Subleague {
+        divisions: [Uuid; 2],
+    }
+
+    let divisions = chron::v2::fetch::<Subleague>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+        .ty("subleague")
+        .id(subleagues.into_iter().map(|s| s.to_string()).join(","))
+        .at(start_time)
+        .build()?)
+        .try_collect::<Vec<_>>().await?
+        .into_iter()
+        .flat_map(|subleague| subleague.data.divisions)
+        .collect::<Vec<_>>();
+
+
+    #[derive(Debug, Deserialize)]
+    struct Division {
+        teams: Vec<Uuid>,
+    }
+
+    let team_ids = chron::v2::fetch::<Division>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+        .ty("division")
+        .id(divisions.into_iter().map(|s| s.to_string()).join(","))
+        .at(start_time)
+        .build()?)
+        .try_collect::<Vec<_>>().await?
+        .into_iter()
+        .flat_map(|league| league.data.teams)
+        .collect::<Vec<_>>();
+
+    let mut teams = HashMap::new();
+    let team_stream = chron::v2::fetch::<Team>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+        .ty("team")
+        .id(team_ids.into_iter().map(|s| s.to_string()).join(","))
+        .at(start_time)
+        .build()?);
+    pin_mut!(team_stream);
+    while let Some(team) = team_stream.next().await {
+        let team = team?;
+        let id = Uuid::parse_str(&team.entity_id)?;
+        teams.insert(id, team.data);
+    }
+
+    println!("Found {} teams", teams.len());
+
+    // TODO Fetch in parallel
+    let mut players = HashMap::new();
+    for team in teams.values() {
+        let player_ids = team.lineup.iter().chain(team.rotation.iter())
+            .map(|id| id.to_string())
+            .join(",");
+        let player_stream = chron::v2::fetch::<Player>(client, CHRON_API_ENDPOINT, chron::v2::RequestBuilder::default()
+            .ty("player")
+            .id(player_ids)
+            .at(start_time)
+            .build()?);
+        pin_mut!(player_stream);
+        while let Some(player) = player_stream.next().await {
+            let player = player?;
+            let id = Uuid::parse_str(&player.entity_id)?;
+            players.insert(id, player.data);
+        }
+    }
+
+    Ok((teams, players))
 }

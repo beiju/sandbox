@@ -2,8 +2,8 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use anyhow::anyhow;
 use fed::{FedEvent, FedEventData};
-use fed::FedEventDataStructure::LetsGo;
 use uuid::Uuid;
+use crate::chronicler_schema::{Player, Team};
 use crate::game::Game;
 use crate::rng::Rng;
 
@@ -11,13 +11,17 @@ use crate::rng::Rng;
 pub struct Sim {
     games: HashMap<Uuid, Game>,
     rng: Rng,
+    teams: HashMap<Uuid, Team>,
+    players: HashMap<Uuid, Player>
 }
 
 impl Sim {
-    pub fn new(s0: u64, s1: u64) -> Self {
+    pub fn new(s0: u64, s1: u64, teams: HashMap<Uuid, Team>, players: HashMap<Uuid, Player>) -> Self {
         Self {
             games: Default::default(),
             rng: Rng::new(s0, s1),
+            teams,
+            players,
         }
     }
 
