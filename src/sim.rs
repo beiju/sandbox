@@ -8,13 +8,12 @@ use crate::game::Game;
 use crate::rng::Rng;
 
 #[derive(Debug)]
-pub struct SimData {
-    pub rng: Rng,
+pub struct World {
     pub teams: HashMap<Uuid, Team>,
     pub players: HashMap<Uuid, Player>,
 }
 
-impl SimData {
+impl World {
     // pretty sure self and player_ids could have different lifetimes if needed
     pub fn iter_players<'a>(&'a self, player_ids: &'a [Uuid]) -> impl Iterator<Item=Option<&'a Player>> + 'a {
         player_ids.into_iter()
@@ -42,18 +41,19 @@ impl SimData {
 #[derive(Debug)]
 pub struct Sim {
     games: HashMap<Uuid, Game>,
-    sim_data: SimData,
+    world: World,
+    rng: Rng,
 }
 
 impl Sim {
     pub fn new(s0: u64, s1: u64, teams: HashMap<Uuid, Team>, players: HashMap<Uuid, Player>) -> Self {
         Self {
             games: Default::default(),
-            sim_data: SimData {
-                rng: Rng::new(s0, s1),
+            world: World {
                 teams,
                 players,
-            }
+            },
+            rng: Rng::new(s0, s1),
         }
     }
 
@@ -70,7 +70,7 @@ impl Sim {
             }
         };
 
-        let event_from_sim = game.tick(&mut self.sim_data)?;
+        let event_from_sim = game.tick(&mut self.world, &mut self.rng)?;
 
         assert_eq!(event.data, event_from_sim);
 

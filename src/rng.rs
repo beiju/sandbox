@@ -34,7 +34,8 @@ impl Rng {
 
     fn refill_cache(&mut self) {
         while self.cache.len() < 64 {
-            self.cache.push( self.next_raw())
+            let val = self.next_raw();
+            self.cache.push(val)
         }
     }
 
