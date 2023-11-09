@@ -15,26 +15,26 @@ impl Rng {
         }
     }
 
-    fn next_raw(&mut self) -> u64 {
-        // Adapted from https://github.com/evanacox/beryl/blob/4ba11b89891e98b66690a0056f0c9ca1ed528205/src/libs/ksupport/src/xorshift128p.rs#L43
-        let mut t = self.s0;
-        let s = self.s1;
-        self.s0 = s;
+    fn step_raw(&mut self) {
+        // Copied from Astrid's sandbox
+        let mut s1 = self.s0;
+        let s0 = self.s1;
+        s1 ^= s1 << 23;
+        s1 ^= s1 >> 17;
+        s1 ^= s0;
+        s1 ^= s0 >> 26;
+        self.s0 = self.s1;
+        self.s1 = s1;
+    }
 
-        t ^= t << 23;
-        t ^= t >> 18;
-        t ^= s ^ (s >> 5);
-
-        self.s1 = t;
-
-        t.wrapping_add(s)
+    fn next_raw(&mut self) -> f64 {
+        self.step_raw();
+        f64::from_bits((self.s0 >> 12) | 0x3FF0000000000000) - 1.0
     }
 
     fn refill_cache(&mut self) {
         while self.cache.len() < 64 {
-            let raw = self.next_raw();
-            let float_bits = (raw >> 12) & 0x3FF0000000000000;
-            self.cache.push(f64::from_bits(float_bits))
+            self.cache.push( self.next_raw())
         }
     }
 
