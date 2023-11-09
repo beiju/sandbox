@@ -1,4 +1,5 @@
 #![feature(iterator_try_collect)]
+#![feature(file_create_new)]
 
 mod sim;
 mod game;
@@ -6,6 +7,9 @@ mod rng;
 mod chronicler_schema;
 
 use std::collections::HashMap;
+use std::fs::File;
+use std::path::Path;
+use std::io::{BufReader, BufWriter};
 use futures::{pin_mut, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use chrono::{DateTime, Utc};
@@ -13,8 +17,9 @@ use fed;
 use uuid::Uuid;
 use crab::chron;
 use serde::Deserialize;
+
 use crate::chronicler_schema::{Player, Team};
-use crate::sim::Sim;
+use crate::sim::{Sim, World};
 
 type Fragment = (i64, (u64, u64), i64, i64, &'static str, &'static str);
 
@@ -248,8 +253,8 @@ async fn main() -> anyhow::Result<()> {
     let mut skipping: Option<u32> = None;
     'fragment_loop: for fragment in FRAGMENTS {
         let (_season, (s0, s1), _offset, _rng_step, start_time, end_time) = fragment;
-        let (teams, players) = get_sim_state_at_time(&client, start_time).await?;
-        let mut sim_state = Sim::new(s0, s1, teams, players);
+        let world = get_world_at_time(&client, start_time).await?;
+        let mut sim_state = Sim::new(s0, s1, world);
         let start_date: DateTime<Utc> = start_time.parse()?;
         let end_date: DateTime<Utc> = end_time.parse()?;
         while let Some(event) = event_iter.next() {
@@ -260,14 +265,15 @@ async fn main() -> anyhow::Result<()> {
                 match skipping {
                     None => {
                         print!("Skipping events...");
+                        skipping = Some(1);
                     }
                     Some(n) => {
-                        skipping = Some(n + 1)
+                        skipping = Some(n + 1);
                     }
                 }
             } else {
                 if let Some(n) = skipping {
-                    println!("{} events skipped", n);
+                    println!(" {} events skipped", n);
                     skipping = None;
                 }
                 sim_state.check_next_event(&event)?;
@@ -278,7 +284,30 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn get_sim_state_at_time(client: &reqwest::Client, start_time_str: &str) -> anyhow::Result<(HashMap<Uuid, Team>, HashMap<Uuid, Player>)> {
+async fn get_world_at_time(client: &reqwest::Client, start_time_str: &str) -> anyhow::Result<World> {
+    let world_cache_folder = Path::new("world_cache");
+    std::fs::create_dir_all(&world_cache_folder)?;
+
+    let world_path = world_cache_folder.join(format!("{start_time_str}.bin"));
+    let world_file = match File::create_new(&world_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // This is the common case, where the world is already saved
+            println!("Reading world from cache");
+            let reader = BufReader::new(File::open(&world_path)?);
+            return Ok(bincode::deserialize_from(reader)?)
+        }
+        other => other?
+    };
+
+    println!("Loading world from network (this may take many seconds)");
+    let world = get_world_at_time_from_network(client, start_time_str).await?;
+    let w = BufWriter::new(world_file);
+    bincode::serialize_into(w, &world)?;
+    Ok(world)
+}
+
+
+async fn get_world_at_time_from_network(client: &reqwest::Client, start_time_str: &str) -> anyhow::Result<World> {
     let start_time = DateTime::parse_from_rfc3339(start_time_str)?.with_timezone(&Utc);
 
     #[derive(Debug, Deserialize)]
@@ -356,7 +385,7 @@ async fn get_sim_state_at_time(client: &reqwest::Client, start_time_str: &str) -
         teams.insert(id, team.data);
     }
 
-    println!("Found {} teams", teams.len());
+    println!("Fetched {} teams", teams.len());
 
     // TODO Fetch in parallel
     let mut players = HashMap::new();
@@ -375,7 +404,8 @@ async fn get_sim_state_at_time(client: &reqwest::Client, start_time_str: &str) -
             let id = Uuid::parse_str(&player.entity_id)?;
             players.insert(id, player.data);
         }
+        println!("Fetched {} players...", players.len());
     }
 
-    Ok((teams, players))
+    Ok(World { teams, players })
 }

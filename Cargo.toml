@@ -20,3 +20,4 @@ tokio = { version = "1.33.0", features = ["macros", "rt-multi-thread"] }
 itertools = "0.11.0"
 crab = { git = "https://github.com/kore-signet/carcinization.git" }
 phf = { version = "0.11.2", features = ["macros"] }
+log = "0.4.20"

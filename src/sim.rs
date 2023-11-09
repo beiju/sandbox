@@ -2,12 +2,13 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use anyhow::anyhow;
 use fed::{FedEvent, FedEventData};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::chronicler_schema::{Player, Team};
 use crate::game::Game;
 use crate::rng::Rng;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct World {
     pub teams: HashMap<Uuid, Team>,
     pub players: HashMap<Uuid, Player>,
@@ -46,13 +47,10 @@ pub struct Sim {
 }
 
 impl Sim {
-    pub fn new(s0: u64, s1: u64, teams: HashMap<Uuid, Team>, players: HashMap<Uuid, Player>) -> Self {
+    pub fn new(s0: u64, s1: u64, world: World) -> Self {
         Self {
             games: Default::default(),
-            world: World {
-                teams,
-                players,
-            },
+            world,
             rng: Rng::new(s0, s1),
         }
     }
