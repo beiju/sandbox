@@ -1,8 +1,14 @@
+use std::collections::HashMap;
 use anyhow::anyhow;
 use fed::{FedEventData, GameEvent, SubEvent, TogglePerforming, Weather};
+use phf::phf_map;
 use uuid::Uuid;
 use crate::chronicler_schema::Team;
 use crate::sim::SimData;
+
+static ITEM_NAMES: phf::Map<&'static str, &'static str> = phf_map! {
+    "AN_ACTUAL_AIRPLANE" => "An Actual Airplane",
+};
 
 #[derive(Debug)]
 pub enum GamePhase {
@@ -112,7 +118,7 @@ impl Game {
     fn start_half_inning(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
         if self.inning < 0 && (
             sim_data.any_player_on_team_has_mod(self.batting_team_game_data().team_id, "SUPERYUMMY")? ||
-            sim_data.any_player_on_team_has_mod(self.pitching_team_game_data().team_id, "SUPERYUMMY")?
+                sim_data.any_player_on_team_has_mod(self.pitching_team_game_data().team_id, "SUPERYUMMY")?
         ) {
             self.phase = GamePhase::SuperyummyAnnouncement;
         } else {
@@ -159,7 +165,15 @@ impl Game {
             game: self.game_event(),
             batter_name: batter.name.to_owned(),
             team_nickname: team.nickname.to_owned(),
-            wielding_item: None,
+            wielding_item: batter.bat.as_ref().map(|bat| {
+                Ok::<_, anyhow::Error>(if !bat.is_empty() {
+                    Some(ITEM_NAMES.get(bat)
+                        .ok_or_else(|| anyhow!("Unknown item name. Note: Item names are in a hard-coded list, maybe it needs to be added?"))?
+                        .to_string())
+                } else {
+                    None
+                })
+            }).transpose()?.flatten(),
             inhabiting: None,
             is_repeating: false,
         })
@@ -173,7 +187,7 @@ impl Game {
                 for player in sim_data.players_on_team(team_id)
                     .ok_or_else(|| anyhow!("Couldn't find batting/pitching team"))? {
                     let player = player.ok_or_else(|| anyhow!("Couldn't find player from team rotation or lineup"))?;
-                    if player.has_mod("SUPERYUMMY") { return Ok((player, team_id)) }
+                    if player.has_mod("SUPERYUMMY") { return Ok((player, team_id)); }
                 }
             }
             Err(anyhow!("Got to state SuperyummyAnnouncement, but no players in this game are Superyummy"))
