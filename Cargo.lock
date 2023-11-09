@@ -407,12 +407,12 @@ dependencies = [
 [[package]]
 name = "enum_flatten"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 
 [[package]]
 name = "enum_flatten_derive"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 dependencies = [
  "itertools 0.10.5",
  "macro_state",
@@ -442,7 +442,7 @@ dependencies = [
 [[package]]
 name = "eventually_api"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 dependencies = [
  "chrono",
  "derive_builder 0.12.0",
@@ -469,7 +469,7 @@ checksum = "25cbce373ec4653f1a01a31e8a5e5ec0c622dc27ff9c4e6606eefef5cbbed4a5"
 [[package]]
 name = "fed"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 dependencies = [
  "chrono",
  "derive_builder 0.12.0",
@@ -899,9 +899,9 @@ checksum = "89d92a4743f9a61002fae18374ed11e7973f530cb3a3255fb354818118b2203c"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da2479e8c062e40bf0066ffa0bc823de0a9368974af99c9f6df941d2c231e03f"
+checksum = "969488b55f8ac402214f3f5fd243ebb7206cf82de60d3172994707a4bcc2b829"
 
 [[package]]
 name = "lock_api"
@@ -2024,7 +2024,7 @@ dependencies = [
 [[package]]
 name = "with_structure"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 dependencies = [
  "chrono",
  "uuid",
@@ -2033,7 +2033,7 @@ dependencies = [
 [[package]]
 name = "with_structure_derive"
 version = "0.1.0"
-source = "git+https://github.com/beiju/fed.git#a4cd5bf5448994ac60b721ac9c109da4ea73ab85"
+source = "git+https://github.com/beiju/fed.git#1dd59f29c9866b1bf02efb88884e33de8965be3e"
 dependencies = [
  "proc-macro2 1.0.69",
  "quote 1.0.33",

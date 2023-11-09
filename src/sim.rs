@@ -13,6 +13,32 @@ pub struct SimData {
     pub teams: HashMap<Uuid, Team>,
     pub players: HashMap<Uuid, Player>,
 }
+
+impl SimData {
+    // pretty sure self and player_ids could have different lifetimes if needed
+    pub fn iter_players<'a>(&'a self, player_ids: &'a [Uuid]) -> impl Iterator<Item=Option<&'a Player>> + 'a {
+        player_ids.into_iter()
+            .map(|player_id| self.players.get(player_id))
+    }
+
+    pub fn players_on_team(&self, team_id: Uuid) -> Option<impl Iterator<Item=Option<&Player>>> {
+        let team = self.teams.get(&team_id)?;
+        Some(self.iter_players(&team.lineup)
+            .chain(self.iter_players(&team.rotation)))
+    }
+
+    pub fn any_player_on_team_has_mod(&self, team_id: Uuid, mod_name: &str) -> anyhow::Result<bool> {
+        let players = self.players_on_team(team_id)
+            .ok_or_else(|| anyhow!("Couldn't find batting team"))?;
+        for player in players {
+            let player = player.ok_or_else(|| anyhow!("Couldn't find player from team rotation or lineup"))?;
+            if player.has_mod(mod_name) { return Ok(true) }
+        }
+
+        Ok(false)
+    }
+}
+
 #[derive(Debug)]
 pub struct Sim {
     games: HashMap<Uuid, Game>,

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use fed::{FedEventData, GameEvent, Weather};
+use fed::{FedEventData, GameEvent, SubEvent, TogglePerforming, Weather};
 use uuid::Uuid;
 use crate::chronicler_schema::Team;
 use crate::sim::SimData;
@@ -10,6 +10,7 @@ pub enum GamePhase {
     NotStarted = 0,
     Starting,
     StartOfHalfInning,
+    SuperyummyAnnouncement,
     BatterUp,
 }
 
@@ -86,6 +87,9 @@ impl Game {
             GamePhase::BatterUp => {
                 self.batter_up(sim_data)
             }
+            GamePhase::SuperyummyAnnouncement => {
+                self.superyummy_announcement(sim_data)
+            }
         }
     }
 
@@ -106,7 +110,14 @@ impl Game {
     }
 
     fn start_half_inning(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
-        self.phase = GamePhase::BatterUp;
+        if self.inning < 0 && (
+            sim_data.any_player_on_team_has_mod(self.batting_team_game_data().team_id, "SUPERYUMMY")? ||
+            sim_data.any_player_on_team_has_mod(self.pitching_team_game_data().team_id, "SUPERYUMMY")?
+        ) {
+            self.phase = GamePhase::SuperyummyAnnouncement;
+        } else {
+            self.phase = GamePhase::BatterUp;
+        }
         self.top_of_inning = !self.top_of_inning;
         self.inning += 1;
         Ok(FedEventData::HalfInningStart {
@@ -128,6 +139,10 @@ impl Game {
         if self.top_of_inning { &self.away } else { &self.home }
     }
 
+    fn pitching_team_game_data(&self) -> &GameByTeam {
+        if self.top_of_inning { &self.home } else { &self.away }
+    }
+
     fn batting_team_game_data_mut(&mut self) -> &mut GameByTeam {
         if self.top_of_inning { &mut self.away } else { &mut self.home }
     }
@@ -143,10 +158,37 @@ impl Game {
         Ok(FedEventData::BatterUp {
             game: self.game_event(),
             batter_name: batter.name.to_owned(),
-            team_name: team.nickname.to_owned(),
+            team_nickname: team.nickname.to_owned(),
             wielding_item: None,
             inhabiting: None,
             is_repeating: false,
+        })
+    }
+
+    fn superyummy_announcement(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
+        self.phase = GamePhase::BatterUp;
+
+        let (player, team_id) = (|| {
+            for team_id in [self.batting_team_game_data().team_id, self.pitching_team_game_data().team_id] {
+                for player in sim_data.players_on_team(team_id)
+                    .ok_or_else(|| anyhow!("Couldn't find batting/pitching team"))? {
+                    let player = player.ok_or_else(|| anyhow!("Couldn't find player from team rotation or lineup"))?;
+                    if player.has_mod("SUPERYUMMY") { return Ok((player, team_id)) }
+                }
+            }
+            Err(anyhow!("Got to state SuperyummyAnnouncement, but no players in this game are Superyummy"))
+        })()?;
+
+        Ok(FedEventData::SuperyummyGameStart {
+            game: self.game_event(),
+            toggle: TogglePerforming {
+                player_id: player.id,
+                team_id,
+                player_name: player.name.to_owned(),
+                is_overperforming: false, // TODO this should look at the weather
+                is_first_proc: true, // TODO This should read whether the player has over/underperforming already
+                sub_event: SubEvent::nil(),
+            },
         })
     }
 }

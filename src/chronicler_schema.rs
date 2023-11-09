@@ -204,3 +204,18 @@ impl Display for Player {
                    .unwrap_or(&self.name))
     }
 }
+
+fn list_has_mod(list: &Option<Vec<String>>, mod_name: &str) -> bool {
+    list.as_ref().is_some_and(|attrs| attrs.iter().any(|attr| attr == mod_name))
+}
+
+impl Player {
+    pub fn has_mod(&self, mod_name: &str) -> bool {
+        false || // for alignment
+            list_has_mod(&self.perm_attr, mod_name) ||
+            list_has_mod(&self.seas_attr, mod_name) ||
+            list_has_mod(&self.week_attr, mod_name) ||
+            list_has_mod(&self.game_attr, mod_name) ||
+            list_has_mod(&self.item_attr, mod_name)
+    }
+}
