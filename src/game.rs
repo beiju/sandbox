@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use anyhow::anyhow;
-use fed::{FedEventData, GameEvent, SubEvent, TogglePerforming, Weather};
+use fed::{FedEventData, GameEvent, GamePitch, SubEvent, TogglePerforming, Weather};
 use phf::phf_map;
 use uuid::Uuid;
-use crate::chronicler_schema::Team;
+use crate::chronicler_schema::{Player, Team};
 use crate::sim::SimData;
 
 static ITEM_NAMES: phf::Map<&'static str, &'static str> = phf_map! {
@@ -18,6 +17,7 @@ pub enum GamePhase {
     StartOfHalfInning,
     SuperyummyAnnouncement,
     BatterUp,
+    Pitch,
 }
 
 #[derive(Debug)]
@@ -90,11 +90,14 @@ impl Game {
             GamePhase::StartOfHalfInning => {
                 self.start_half_inning(sim_data)
             }
+            GamePhase::SuperyummyAnnouncement => {
+                self.superyummy_announcement(sim_data)
+            }
             GamePhase::BatterUp => {
                 self.batter_up(sim_data)
             }
-            GamePhase::SuperyummyAnnouncement => {
-                self.superyummy_announcement(sim_data)
+            GamePhase::Pitch => {
+                self.pitch(sim_data)
             }
         }
     }
@@ -141,6 +144,10 @@ impl Game {
         sim_data.teams.get(&self.batting_team_game_data().team_id)
     }
 
+    fn pitching_team<'a>(&self, sim_data: &'a SimData) -> Option<&'a Team> {
+        sim_data.teams.get(&self.pitching_team_game_data().team_id)
+    }
+
     fn batting_team_game_data(&self) -> &GameByTeam {
         if self.top_of_inning { &self.away } else { &self.home }
     }
@@ -151,32 +158,6 @@ impl Game {
 
     fn batting_team_game_data_mut(&mut self) -> &mut GameByTeam {
         if self.top_of_inning { &mut self.away } else { &mut self.home }
-    }
-
-    fn batter_up(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
-        // self.phase = GamePhase::BatterUp;
-        self.batting_team_game_data_mut().team_batter_count += 1;
-        let team = self.batting_team(sim_data)
-            .ok_or_else(|| anyhow!("Couldn't find batting team"))?;
-        let batter_id = team.lineup[(self.batting_team_game_data().team_batter_count as usize) % team.lineup.len()];
-        let batter = sim_data.players.get(&batter_id)
-            .ok_or_else(|| anyhow!("Couldn't find batter"))?;
-        Ok(FedEventData::BatterUp {
-            game: self.game_event(),
-            batter_name: batter.name.to_owned(),
-            team_nickname: team.nickname.to_owned(),
-            wielding_item: batter.bat.as_ref().map(|bat| {
-                Ok::<_, anyhow::Error>(if !bat.is_empty() {
-                    Some(ITEM_NAMES.get(bat)
-                        .ok_or_else(|| anyhow!("Unknown item name. Note: Item names are in a hard-coded list, maybe it needs to be added?"))?
-                        .to_string())
-                } else {
-                    None
-                })
-            }).transpose()?.flatten(),
-            inhabiting: None,
-            is_repeating: false,
-        })
     }
 
     fn superyummy_announcement(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
@@ -204,5 +185,235 @@ impl Game {
                 sub_event: SubEvent::nil(),
             },
         })
+    }
+
+    fn get_batter<'a>(&self, sim_data: &'a SimData) -> anyhow::Result<&'a Player> {
+        Ok(self.get_batter_and_team(sim_data)?.0)
+    }
+
+    fn get_batter_and_team<'a>(&self, sim_data: &'a SimData) -> anyhow::Result<(&'a Player, &'a Team)> {
+        let team = self.batting_team(sim_data)
+            .ok_or_else(|| anyhow!("Couldn't find batting team"))?;
+        let batter_id = team.lineup[(self.batting_team_game_data().team_batter_count as usize) % team.lineup.len()];
+        let batter = sim_data.players.get(&batter_id)
+            .ok_or_else(|| anyhow!("Couldn't find batter"))?;
+        Ok((batter, team))
+    }
+
+    fn get_pitcher<'a>(&self, sim_data: &'a SimData) -> anyhow::Result<&'a Player> {
+        Ok(self.get_pitcher_and_team(sim_data)?.0)
+    }
+
+    fn get_pitcher_and_team<'a>(&self, sim_data: &'a SimData) -> anyhow::Result<(&'a Player, &'a Team)> {
+        let team = self.pitching_team(sim_data)
+            .ok_or_else(|| anyhow!("Couldn't find pitching team"))?;
+        let pitcher_id = team.lineup[(team.rotation_slot as usize) % team.lineup.len()];
+        let pitcher = sim_data.players.get(&pitcher_id)
+            .ok_or_else(|| anyhow!("Couldn't find pitcher"))?;
+        Ok((pitcher, team))
+    }
+
+    fn batter_up(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
+        self.phase = GamePhase::Pitch;
+        self.batting_team_game_data_mut().team_batter_count += 1;
+        let (batter, team) = self.get_batter_and_team(sim_data)?;
+        Ok(FedEventData::BatterUp {
+            game: self.game_event(),
+            batter_name: batter.name.to_owned(),
+            team_nickname: team.nickname.to_owned(),
+            wielding_item: batter.bat.as_ref().map(|bat| {
+                Ok::<_, anyhow::Error>(if !bat.is_empty() {
+                    Some(ITEM_NAMES.get(bat)
+                        .ok_or_else(|| anyhow!("Unknown item name. Note: Item names are in a hard-coded list, maybe it needs to be added?"))?
+                        .to_string())
+                } else {
+                    None
+                })
+            }).transpose()?.flatten(),
+            inhabiting: None, // TODO handle ghosts
+            is_repeating: false, // TODO
+        })
+    }
+
+    fn pitch(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
+        // We're really in it now. The following is copied from handle() in resim.py
+
+        // TODO (s17+) prize match roll
+        // TODO (s13+) psychoacoustics roll
+        // TODO (s?) a blood roll
+        // TODO sun2/black hole activation, incl. sun dialed/unholey
+        // TODO fax, incl. shadow boost
+        // theres so much more in handle_misc() i got lost
+
+        // TODO (s?) elsewhere/scattered
+
+        if let Some(weather) = self.roll_weather(sim_data)? { return Ok(weather); }
+
+        // TODO parties
+        // TODO flooding
+        // TODO polarity
+        // TODO consumers
+        // TODO ballpark effects
+
+        // TODO base stealing
+
+        // TODO electric
+        // TODO debt
+        // TODO bird out
+        // TODO mild
+        // TODO charm
+
+        self.actual_pitch(sim_data)
+    }
+
+    fn actual_pitch(&mut self, sim_data: &mut SimData) -> anyhow::Result<FedEventData> {
+        // This is when we've passed all the things that can preempt a pitch and we finally know
+        // one actually gets thrown
+        let roll = sim_data.rng.next();
+        let batter = self.get_batter(sim_data)?;
+        let pitcher = self.get_pitcher(sim_data)?;
+
+        // NOT EVEN CLOSE TO ACCURATE YET. I just want something that runs
+        let is_strike = roll < 0.2 + 0.35 * pitcher.ruthlessness + 0.1 * batter.musclitude;
+
+        // TODO acidic pitch
+        // TODO firey
+
+        // TODO flinch
+
+        // Again: not even close to correct yet
+        let swung_threshold = if is_strike {
+            let combined_batting = (batter.divinity + batter.musclitude + (1. - batter.patheticism) + batter.thwackability) / 4.;
+            0.7 + 0.35 * combined_batting - 0.4 * pitcher.ruthlessness
+        } else {
+            let mut threshold = (12. * pitcher.ruthlessness - 5. * batter.moxie + 5. * batter.patheticism) / 20.;
+            // Can't "just" use max(min(... because rust cares that NaN isn't totally ordered
+            if threshold > 0.95 { threshold = 0.95 }
+            if threshold < 0.1 { threshold = 0.1 }
+            threshold
+        };
+        let swung = sim_data.rng.next() < swung_threshold;
+
+        if !swung {
+            if is_strike {
+                return Ok(FedEventData::StrikeLooking {
+                    game: self.game_event(),
+                    pitch: GamePitch { double_strike: None },
+                    balls: 0,
+                    strikes: 1,
+                    pitcher_item_damage: None,
+                });
+            } else {
+                return Ok(FedEventData::Ball {
+                    game: self.game_event(),
+                    balls: 0,
+                    strikes: 1,
+                    batter_item_damage: None,
+                });
+            }
+        }
+
+        todo!()
+    }
+
+    fn roll_weather(&self, sim_data: &mut SimData) -> anyhow::Result<Option<FedEventData>> {
+        match self.weather {
+            Weather::Sun2 => { Ok(None) }
+            Weather::Snowy => { todo!() }
+            Weather::SolarEclipse => {
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Glitter => { todo!() }
+            Weather::Blooddrain => {
+                // TODO Figure out the correct threshold for blooddrain
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Peanuts => {
+                // TODO Figure out the correct threshold for peanuts
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Birds => {
+                // TODO Figure out the correct threshold for birds
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Feedback => {
+                // TODO Figure out the correct threshold for feedback
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Reverb => {
+                // TODO Figure out the correct threshold for reverb
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::BlackHole => { Ok(None) }
+            Weather::Coffee => { Ok(None) }
+            Weather::Coffee2 => { Ok(None) }
+            Weather::Coffee3s => { Ok(None) }
+            Weather::Flooding => {
+                // TODO Figure out the correct threshold for flooding
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::Salmon => {
+                // TODO Figure out the correct threshold for salmon
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::PolarityPlus => { Ok(None) }
+            Weather::PolarityMinus => { Ok(None) }
+            Weather::Sun90 => { Ok(None) }
+            Weather::SunPoint1 => { Ok(None) }
+            Weather::SumSun => { Ok(None) }
+            Weather::SupernovaEclipse => {
+                // TODO Figure out the correct threshold for supernova eclipse
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            Weather::BlackHoleBlackHole => { Ok(None) }
+            Weather::Jazz => { todo!() }
+            Weather::Night => {
+                // TODO Figure out the correct threshold for night
+                if sim_data.rng.next() < 0.00025 {
+                    todo!()
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => {
+                Err(anyhow!("Encountered weather {:?}, but it was never used", self.weather))
+            }
+        }
     }
 }
